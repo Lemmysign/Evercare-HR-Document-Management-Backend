@@ -5,6 +5,7 @@ import com.hrplatform.dto.response.PagedResponse;
 import com.hrplatform.dto.response.SubmissionDetailsResponse;
 import com.hrplatform.dto.response.SubmissionListResponse;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface SubmissionService {
@@ -12,4 +13,6 @@ public interface SubmissionService {
     PagedResponse<SubmissionListResponse> getFilteredSubmissions(SubmissionFilterRequest request);
 
     SubmissionDetailsResponse getSubmissionDetails(UUID staffId);
+
+    List<SubmissionListResponse> getRecentSubmissions();
 }

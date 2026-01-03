@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -46,4 +47,6 @@ public interface DocumentSubmissionRepository extends JpaRepository<DocumentSubm
     List<DocumentSubmission> findByStaffIdWithDetails(@Param("staffId") UUID staffId);
 
     boolean existsByStaffIdAndDocumentRequirementId(UUID staffId, UUID requirementId);
+
+    Optional<DocumentSubmission> findTopByStaffIdOrderByCreatedAtDesc(UUID staffId);
 }

@@ -62,4 +62,20 @@ public interface StaffRepository extends JpaRepository<Staff, UUID> {
     @Modifying
     @Query("UPDATE Staff s SET s.department.id = :departmentId WHERE s.id = :staffId")
     void updateStaffDepartment(@Param("staffId") UUID staffId, @Param("departmentId") UUID departmentId);
+
+
+    @Query("""
+    SELECT s FROM Staff s
+    WHERE s.id IN (
+        SELECT DISTINCT ds.staff.id
+        FROM DocumentSubmission ds
+    )
+    ORDER BY (
+        SELECT MAX(ds2.createdAt)
+        FROM DocumentSubmission ds2
+        WHERE ds2.staff.id = s.id
+    ) DESC
+""")
+    Page<Staff> findStaffWithRecentSubmissions(Pageable pageable);
+
 }

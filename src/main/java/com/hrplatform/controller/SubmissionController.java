@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -52,4 +53,18 @@ public class SubmissionController {
 
         return ResponseEntity.ok(ApiResponse.success(response, "Submission details retrieved successfully"));
     }
+
+
+    @GetMapping("/recent")
+    @PreAuthorize("hasRole('HR')")
+    @Operation(summary = "Get recent submissions", description = "Retrieve last 5 staff submissions (HR only)")
+    public ResponseEntity<ApiResponse<List<SubmissionListResponse>>> getRecentSubmissions() {
+        log.info("Fetching recent submissions");
+
+        List<SubmissionListResponse> response = submissionService.getRecentSubmissions();
+
+        return ResponseEntity.ok(ApiResponse.success(response, "Recent submissions retrieved successfully"));
+    }
+
+
 }

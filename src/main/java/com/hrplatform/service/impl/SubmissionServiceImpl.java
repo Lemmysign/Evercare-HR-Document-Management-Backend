@@ -99,4 +99,22 @@ public class SubmissionServiceImpl implements SubmissionService {
     public SubmissionDetailsResponse getSubmissionDetails(UUID staffId) {
         return staffService.getStaffSubmissionDetails(staffId);
     }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SubmissionListResponse> getRecentSubmissions() {
+        log.info("Fetching last 5 submissions");
+
+        Pageable pageable = PageRequest.of(0, 5);
+        Page<Staff> recentStaffPage = staffRepository.findStaffWithRecentSubmissions(pageable);
+
+        return recentStaffPage.getContent().stream()
+                .map(staff -> {
+                    Long submissionCount = documentSubmissionRepository.countByStaffId(staff.getId());
+                    return staffMapper.toSubmissionListResponse(staff, submissionCount);
+                })
+                .collect(Collectors.toList());
+    }
+
 }
