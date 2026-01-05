@@ -15,4 +15,18 @@ public interface SubmissionService {
     SubmissionDetailsResponse getSubmissionDetails(UUID staffId);
 
     List<SubmissionListResponse> getRecentSubmissions();
+
+    // NEW: Get all staff with pagination
+    PagedResponse<SubmissionListResponse> getAllStaff(int page, int size);
+
+    PagedResponse<SubmissionListResponse> getAllStaffOrderedBySubmissions(int page, int size);
+
+
+    PagedResponse<SubmissionListResponse> getAllStaffFiltered(
+            int page,
+            int size,
+            String search,
+            UUID departmentId,
+            String status
+    );
 }

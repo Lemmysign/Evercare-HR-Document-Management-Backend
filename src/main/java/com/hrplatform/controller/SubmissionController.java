@@ -67,4 +67,74 @@ public class SubmissionController {
     }
 
 
+    @GetMapping("/all-staff")
+    @PreAuthorize("hasRole('HR')")
+    @Operation(
+            summary = "Get all staff with pagination",
+            description = "Retrieve all staff with their submission counts (HR only). Returns 10 staff per page by default."
+    )
+    public ResponseEntity<ApiResponse<PagedResponse<SubmissionListResponse>>> getAllStaff(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        log.info("Fetching all staff - Page: {}, Size: {}", page, size);
+
+        PagedResponse<SubmissionListResponse> response = submissionService.getAllStaff(page, size);
+
+        String message = String.format("Retrieved %d staff out of %d total",
+                response.getContent().size(),
+                response.getTotalElements());
+
+        return ResponseEntity.ok(ApiResponse.success(response, message));
+    }
+
+    @GetMapping("/all-staff/by-submissions")
+    @PreAuthorize("hasRole('HR')")
+    @Operation(
+            summary = "Get all staff ordered by submissions",
+            description = "Retrieve all staff ordered by number of documents submitted (most first)"
+    )
+    public ResponseEntity<ApiResponse<PagedResponse<SubmissionListResponse>>> getAllStaffBySubmissions(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        log.info("Fetching all staff ordered by submissions - Page: {}, Size: {}", page, size);
+
+        PagedResponse<SubmissionListResponse> response = submissionService.getAllStaffOrderedBySubmissions(page, size);
+
+        String message = String.format("Retrieved %d staff ordered by submissions",
+                response.getContent().size());
+
+        return ResponseEntity.ok(ApiResponse.success(response, message));
+    }
+
+
+    @PostMapping("/all-staff/filter")
+    @PreAuthorize("hasRole('HR')")
+    @Operation(
+            summary = "Get all staff with filters and pagination",
+            description = "Retrieve all staff with filters for search, department, and status"
+    )
+    public ResponseEntity<ApiResponse<PagedResponse<SubmissionListResponse>>> getAllStaffFiltered(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) UUID departmentId,
+            @RequestParam(required = false) String status) {
+
+        log.info("Fetching filtered staff - Page: {}, Size: {}, Search: {}, Dept: {}, Status: {}",
+                page, size, search, departmentId, status);
+
+        PagedResponse<SubmissionListResponse> response = submissionService.getAllStaffFiltered(
+                page, size, search, departmentId, status);
+
+        String message = String.format("Retrieved %d staff out of %d total",
+                response.getContent().size(),
+                response.getTotalElements());
+
+        return ResponseEntity.ok(ApiResponse.success(response, message));
+
+    }
+
+
 }

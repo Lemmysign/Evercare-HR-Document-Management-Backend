@@ -5,6 +5,7 @@ import com.hrplatform.dto.response.PagedResponse;
 import com.hrplatform.dto.response.SubmissionDetailsResponse;
 import com.hrplatform.dto.response.SubmissionListResponse;
 import com.hrplatform.entity.Staff;
+import com.hrplatform.exception.BadRequestException;
 import com.hrplatform.mapper.StaffMapper;
 import com.hrplatform.repository.DocumentSubmissionRepository;
 import com.hrplatform.repository.StaffRepository;
@@ -18,7 +19,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import com.hrplatform.repository.StaffRepository;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -32,6 +36,8 @@ public class SubmissionServiceImpl implements SubmissionService {
     private final DocumentSubmissionRepository documentSubmissionRepository;
     private final StaffService staffService;
     private final StaffMapper staffMapper;
+
+
 
     @Override
     @Transactional(readOnly = true)
@@ -116,5 +122,111 @@ public class SubmissionServiceImpl implements SubmissionService {
                 })
                 .collect(Collectors.toList());
     }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<SubmissionListResponse> getAllStaff(int page, int size) {
+        log.info("Fetching all staff - Page: {}, Size: {}", page, size);
+
+        if (page < 0) {
+            throw new BadRequestException("Page number cannot be negative");
+        }
+
+        if (size <= 0 || size > 100) {
+            throw new BadRequestException("Page size must be between 1 and 100");
+        }
+
+        Pageable pageable = PageRequest.of(page, size);
+
+        Page<SubmissionListResponse> staffPage = staffRepository.findAllStaffWithSubmissionCount(pageable);
+
+        log.info("Retrieved {} staff records out of {} total",
+                staffPage.getNumberOfElements(),
+                staffPage.getTotalElements());
+
+        return PagedResponse.<SubmissionListResponse>builder()
+                .content(staffPage.getContent())
+                .pageNumber(staffPage.getNumber())
+                .pageSize(staffPage.getSize())
+                .totalElements(staffPage.getTotalElements())
+                .totalPages(staffPage.getTotalPages())
+                .last(staffPage.isLast())
+                .first(staffPage.isFirst())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<SubmissionListResponse> getAllStaffOrderedBySubmissions(int page, int size) {
+        log.info("Fetching all staff ordered by submissions - Page: {}, Size: {}", page, size);
+
+        if (page < 0) {
+            throw new BadRequestException("Page number cannot be negative");
+        }
+
+        if (size <= 0 || size > 100) {
+            throw new BadRequestException("Page size must be between 1 and 100");
+        }
+
+        Pageable pageable = PageRequest.of(page, size);
+
+        Page<SubmissionListResponse> staffPage = staffRepository.findAllStaffOrderedBySubmissions(pageable);
+
+        log.info("Retrieved {} staff records ordered by submissions",
+                staffPage.getNumberOfElements());
+
+        return PagedResponse.<SubmissionListResponse>builder()
+                .content(staffPage.getContent())
+                .pageNumber(staffPage.getNumber())
+                .pageSize(staffPage.getSize())
+                .totalElements(staffPage.getTotalElements())
+                .totalPages(staffPage.getTotalPages())
+                .last(staffPage.isLast())
+                .first(staffPage.isFirst())
+                .build();
+    }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<SubmissionListResponse> getAllStaffFiltered(
+            int page,
+            int size,
+            String search,
+            UUID departmentId,
+            String status) {
+
+        log.info("Fetching filtered staff - Page: {}, Size: {}, Search: {}, Dept: {}, Status: {}",
+                page, size, search, departmentId, status);
+
+        if (page < 0) {
+            throw new BadRequestException("Page number cannot be negative");
+        }
+
+        if (size <= 0 || size > 100) {
+            throw new BadRequestException("Page size must be between 1 and 100");
+        }
+
+        Pageable pageable = PageRequest.of(page, size);
+
+        Page<SubmissionListResponse> staffPage = staffRepository.findAllStaffWithFilters(
+                search, departmentId, status, pageable);
+
+        log.info("Retrieved {} staff records out of {} total",
+                staffPage.getNumberOfElements(),
+                staffPage.getTotalElements());
+
+        return PagedResponse.<SubmissionListResponse>builder()
+                .content(staffPage.getContent())
+                .pageNumber(staffPage.getNumber())
+                .pageSize(staffPage.getSize())
+                .totalElements(staffPage.getTotalElements())
+                .totalPages(staffPage.getTotalPages())
+                .last(staffPage.isLast())
+                .first(staffPage.isFirst())
+                .build();
+    }
+
 
 }

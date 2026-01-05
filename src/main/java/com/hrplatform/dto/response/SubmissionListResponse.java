@@ -10,7 +10,6 @@ import java.util.UUID;
 @Data
 @Builder
 @NoArgsConstructor
-@AllArgsConstructor
 public class SubmissionListResponse {
 
     private UUID staffId;
@@ -20,4 +19,19 @@ public class SubmissionListResponse {
     private String departmentName;
     private Long documentsSubmitted;
     private Boolean hasSubmissions;
+
+    public SubmissionListResponse(UUID staffId, String staffIdNumber, String fullName,
+                                  String email, String departmentName, Long documentsSubmitted,
+                                  Boolean hasSubmissions) {
+        this.staffId = staffId;
+        this.staffIdNumber = staffIdNumber;
+        this.fullName = fullName;
+        this.email = email;
+        this.departmentName = departmentName;
+        this.documentsSubmitted = documentsSubmitted;
+        this.hasSubmissions = hasSubmissions;
+    }
+
+
 }
+
