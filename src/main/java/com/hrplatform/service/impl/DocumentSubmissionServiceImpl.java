@@ -17,6 +17,7 @@ import com.hrplatform.service.DocumentSubmissionService;
 import com.hrplatform.service.StaffService;
 import com.hrplatform.util.FileUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,15 +38,18 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
     private final CloudinaryService cloudinaryService;
     private final DocumentSubmissionMapper documentSubmissionMapper;
     private final AuditService auditService;
-    private final ExecutorService executorService;
+    private final Executor taskExecutor;
+    private final DocumentPersistenceService documentPersistenceService;
 
+    // Manual constructor to handle @Qualifier properly
     public DocumentSubmissionServiceImpl(
             DocumentSubmissionRepository documentSubmissionRepository,
             StaffService staffService,
             DocumentRequirementService documentRequirementService,
             CloudinaryService cloudinaryService,
             DocumentSubmissionMapper documentSubmissionMapper,
-            AuditService auditService) {
+            AuditService auditService,
+            @Qualifier("taskExecutor") Executor taskExecutor, DocumentPersistenceService documentPersistenceService) {
 
         this.documentSubmissionRepository = documentSubmissionRepository;
         this.staffService = staffService;
@@ -53,16 +57,8 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
         this.cloudinaryService = cloudinaryService;
         this.documentSubmissionMapper = documentSubmissionMapper;
         this.auditService = auditService;
-
-        // Thread pool for concurrent uploads
-        this.executorService = new ThreadPoolExecutor(
-                10,
-                30,
-                60L,
-                TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(100),
-                new ThreadPoolExecutor.CallerRunsPolicy()
-        );
+        this.taskExecutor = taskExecutor;
+        this.documentPersistenceService = documentPersistenceService;
     }
 
     @Override
@@ -70,37 +66,29 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
     public DocumentUploadResponse uploadDocument(String staffIdNumber, DocumentUploadRequest request) {
         log.info("Processing document upload for staff: {}", staffIdNumber);
 
-        // Validate file
         validateFile(request.getFile());
 
-        // Find staff (case-insensitive)
         Staff staff = staffService.findByStaffIdNumber(staffIdNumber);
 
-        // Verify staff has selected a department
         if (staff.getDepartment() == null) {
             throw new BadRequestException("Please select a department before uploading documents");
         }
 
-        // Find document requirement
         DocumentRequirement requirement = documentRequirementService.findById(request.getDocumentRequirementId());
 
-        // Verify requirement belongs to staff's department
         if (!requirement.getDepartment().getId().equals(staff.getDepartment().getId())) {
             throw new BadRequestException("This document requirement does not belong to your department");
         }
 
-        // Check if already submitted
         if (documentSubmissionRepository.existsByStaffIdAndDocumentRequirementId(
                 staff.getId(), requirement.getId())) {
             throw new BadRequestException("Document already submitted for this requirement");
         }
 
-        // FIXED: Extract department name before Cloudinary upload
         String departmentName = staff.getDepartment().getName();
         String staffFullName = staff.getFullName();
         String documentName = requirement.getDocumentName();
 
-        // Upload to Cloudinary
         try {
             String folder = cloudinaryService.generateFolder(departmentName);
             String customFileName = generateCustomFileName(staffFullName, documentName);
@@ -111,7 +99,6 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
                     customFileName
             );
 
-            // Save submission to database
             DocumentSubmission submission = DocumentSubmission.builder()
                     .staff(staff)
                     .documentRequirement(requirement)
@@ -152,12 +139,6 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
         }
     }
 
-
-    @Transactional
-    protected DocumentSubmission saveSubmissionInNewTransaction(DocumentSubmission submission) {
-        return documentSubmissionRepository.save(submission);
-    }
-
     @Override
     @Transactional(readOnly = true)
     public Long countTotalSubmissions() {
@@ -174,6 +155,30 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
         log.info("Processing multiple document uploads for staff: {} ({} files)",
                 staff.getStaffIdNumber(), files.size());
 
+        validateUploadRequest(requirementIds, files, staff);
+
+        String departmentName = staff.getDepartment().getName();
+        UUID departmentId = staff.getDepartment().getId();
+        String staffFullName = staff.getFullName();
+        UUID staffId = staff.getId();
+        String staffIdNum = staff.getStaffIdNumber();
+
+        List<DocumentRequirementData> requirementDataList =
+                validateAndPrepareRequirements(requirementIds, files, departmentId, staffId);
+
+        List<CompletableFuture<DocumentUploadResponse>> uploadFutures =
+                processAsyncUploads(files, requirementDataList, staff, departmentName, staffFullName, staffIdNum);
+
+        return waitForAllUploads(uploadFutures, staffIdNum);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Long countSubmissionsByStaffId(UUID staffId) {
+        return documentSubmissionRepository.countByStaffId(staffId);
+    }
+
+    private void validateUploadRequest(List<UUID> requirementIds, List<MultipartFile> files, Staff staff) {
         if (requirementIds.size() != files.size()) {
             throw new BadRequestException("Number of requirements must match number of files");
         }
@@ -181,25 +186,22 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
         if (staff.getDepartment() == null) {
             throw new BadRequestException("Please select a department before uploading documents");
         }
+    }
 
-        // CRITICAL FIX: Extract all lazy-loaded data BEFORE async operations
-        String departmentName = staff.getDepartment().getName();
-        UUID departmentId = staff.getDepartment().getId();
-        String staffFullName = staff.getFullName();
-        UUID staffId = staff.getId();
-        String staffIdNum = staff.getStaffIdNumber();
+    private List<DocumentRequirementData> validateAndPrepareRequirements(
+            List<UUID> requirementIds,
+            List<MultipartFile> files,
+            UUID departmentId,
+            UUID staffId) {
 
-        // Validate all files and requirements BEFORE starting async uploads
         List<DocumentRequirementData> requirementDataList = new ArrayList<>();
 
         for (int i = 0; i < requirementIds.size(); i++) {
             MultipartFile file = files.get(i);
             UUID requirementId = requirementIds.get(i);
 
-            // Validate file
             validateFile(file);
 
-            // Fetch and validate requirement
             DocumentRequirement requirement = documentRequirementService.findById(requirementId);
 
             if (!requirement.getDepartment().getId().equals(departmentId)) {
@@ -212,92 +214,117 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
             if (documentSubmissionRepository.existsByStaffIdAndDocumentRequirementId(
                     staffId, requirement.getId())) {
                 throw new BadRequestException(
-                        "Document already submitted"
+                        "Document '" + requirement.getDocumentName() + "' already submitted"
                 );
             }
 
-            // Extract requirement data BEFORE async operation
-            DocumentRequirementData reqData = new DocumentRequirementData(
+            requirementDataList.add(new DocumentRequirementData(
                     requirement.getId(),
                     requirement.getDocumentName(),
                     requirement
-            );
-            requirementDataList.add(reqData);
+            ));
         }
 
-        // Now perform async uploads
+        return requirementDataList;
+    }
+
+    private List<CompletableFuture<DocumentUploadResponse>> processAsyncUploads(
+            List<MultipartFile> files,
+            List<DocumentRequirementData> requirementDataList,
+            Staff staff,
+            String departmentName,
+            String staffFullName,
+            String staffIdNum) {
+
         List<CompletableFuture<DocumentUploadResponse>> uploadFutures = new ArrayList<>();
 
         for (int i = 0; i < files.size(); i++) {
-            final int index = i;
-            final MultipartFile file = files.get(index);
-            final DocumentRequirementData reqData = requirementDataList.get(index);
+            final MultipartFile file = files.get(i);
+            final DocumentRequirementData reqData = requirementDataList.get(i);
 
-            CompletableFuture<DocumentUploadResponse> future = CompletableFuture.supplyAsync(() -> {
-                try {
-                    log.info("Uploading document: {} for staff: {}", reqData.documentName, staffIdNum);
-
-                    String folder = cloudinaryService.generateFolder(departmentName);
-                    String customFileName = generateCustomFileName(staffFullName, reqData.documentName);
-
-                    Map<String, Object> uploadResult = cloudinaryService.uploadFile(
-                            file,
-                            folder,
-                            customFileName
-                    );
-
-                    // Create submission
-                    DocumentSubmission submission = DocumentSubmission.builder()
-                            .staff(staff)
-                            .documentRequirement(reqData.requirement)
-                            .cloudinaryUrl((String) uploadResult.get("secure_url"))
-                            .cloudinaryPublicId((String) uploadResult.get("public_id"))
-                            .fileName(file.getOriginalFilename())
-                            .fileSize(file.getSize())
-                            .mimeType(file.getContentType())
-                            .build();
-
-                    // Save in new transaction
-                    DocumentSubmission savedSubmission = saveSubmissionInNewTransaction(submission);
-
-                    auditService.logUploadSuccess(
-                            staffIdNum,
-                            departmentName,
-                            reqData.documentName,
-                            (String) uploadResult.get("secure_url")
-                    );
-
-                    return documentSubmissionMapper.toUploadResponse(
-                            savedSubmission,
-                            "Document uploaded successfully"
-                    );
-
-                } catch (Exception e) {
-                    log.error("Failed to upload document {} for staff: {}",
-                            reqData.documentName, staffIdNum, e);
-
-                    auditService.logUploadFailure(
-                            staffIdNum,
-                            departmentName,
-                            reqData.documentName,
-                            e.getMessage()
-                    );
-
-                    throw new CloudinaryUploadException(
-                            "Failed to upload " + reqData.documentName + ": " + e.getMessage()
-                    );
-                }
-            }, executorService);
+            CompletableFuture<DocumentUploadResponse> future = CompletableFuture.supplyAsync(() ->
+                            uploadSingleDocument(file, reqData, staff, departmentName, staffFullName, staffIdNum),
+                    taskExecutor
+            );
 
             uploadFutures.add(future);
         }
+
+        return uploadFutures;
+    }
+
+
+    private DocumentUploadResponse uploadSingleDocument(
+            MultipartFile file,
+            DocumentRequirementData reqData,
+            Staff staff,
+            String departmentName,
+            String staffFullName,
+            String staffIdNum) {
+
+        try {
+            log.info("Uploading document: {} for staff: {}", reqData.documentName, staffIdNum);
+
+            String folder = cloudinaryService.generateFolder(departmentName);
+            String customFileName = generateCustomFileName(staffFullName, reqData.documentName);
+
+            Map<String, Object> uploadResult = cloudinaryService.uploadFile(
+                    file,
+                    folder,
+                    customFileName
+            );
+
+            DocumentSubmission submission = DocumentSubmission.builder()
+                    .staff(staff)
+                    .documentRequirement(reqData.requirement)
+                    .cloudinaryUrl((String) uploadResult.get("secure_url"))
+                    .cloudinaryPublicId((String) uploadResult.get("public_id"))
+                    .fileName(file.getOriginalFilename())
+                    .fileSize(file.getSize())
+                    .mimeType(file.getContentType())
+                    .build();
+
+            DocumentSubmission savedSubmission = documentPersistenceService.saveInNewTransaction(submission);
+
+            auditService.logUploadSuccess(
+                    staffIdNum,
+                    departmentName,
+                    reqData.documentName,
+                    (String) uploadResult.get("secure_url")
+            );
+
+            return documentSubmissionMapper.toUploadResponse(
+                    savedSubmission,
+                    "Document uploaded successfully"
+            );
+
+        } catch (Exception e) {
+            log.error("Failed to upload document {} for staff: {}",
+                    reqData.documentName, staffIdNum, e);
+
+            auditService.logUploadFailure(
+                    staffIdNum,
+                    departmentName,
+                    reqData.documentName,
+                    e.getMessage()
+            );
+
+            throw new CloudinaryUploadException(
+                    "Failed to upload " + reqData.documentName + ": " + e.getMessage()
+            );
+        }
+    }
+
+    private List<DocumentUploadResponse> waitForAllUploads(
+            List<CompletableFuture<DocumentUploadResponse>> uploadFutures,
+            String staffIdNum) {
 
         try {
             CompletableFuture<Void> allUploads = CompletableFuture.allOf(
                     uploadFutures.toArray(new CompletableFuture[0])
             );
 
-            allUploads.get(300, TimeUnit.SECONDS); // 5 minutes timeout
+            allUploads.get(300, TimeUnit.SECONDS);
 
             List<DocumentUploadResponse> responses = new ArrayList<>();
             for (CompletableFuture<DocumentUploadResponse> future : uploadFutures) {
@@ -310,17 +337,18 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
         } catch (TimeoutException e) {
             log.error("Upload timeout for staff: {}", staffIdNum);
             throw new CloudinaryUploadException("Upload timeout. Please try again.");
-        } catch (Exception e) {
+        } catch (ExecutionException e) {
             log.error("Failed to upload multiple documents for staff: {}", staffIdNum, e);
-            throw new CloudinaryUploadException("Failed to upload documents: " + e.getMessage());
+            Throwable cause = e.getCause();
+            if (cause instanceof CloudinaryUploadException) {
+                throw (CloudinaryUploadException) cause;
+            }
+            throw new CloudinaryUploadException("Failed to upload documents: " + cause.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Upload interrupted for staff: {}", staffIdNum);
+            throw new CloudinaryUploadException("Upload interrupted. Please try again.");
         }
-    }
-
-
-    @Override
-    @Transactional(readOnly = true)
-    public Long countSubmissionsByStaffId(UUID staffId) {
-        return documentSubmissionRepository.countByStaffId(staffId);
     }
 
     private void validateFile(MultipartFile file) {
@@ -350,7 +378,9 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
     }
 
     private String cleanString(String input) {
-        if (input == null) return "";
+        if (input == null) {
+            return "";
+        }
 
         return input.trim()
                 .toLowerCase()
@@ -359,7 +389,6 @@ public class DocumentSubmissionServiceImpl implements DocumentSubmissionService 
                 .replaceAll("^_|_$", "");
     }
 
-    // Helper class to store requirement data
     private static class DocumentRequirementData {
         final UUID requirementId;
         final String documentName;
