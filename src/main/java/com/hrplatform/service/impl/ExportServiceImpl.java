@@ -5,6 +5,7 @@ import com.hrplatform.dto.response.ExportResponse;
 import com.hrplatform.entity.Department;
 import com.hrplatform.entity.DocumentSubmission;
 import com.hrplatform.entity.Staff;
+import com.hrplatform.exception.ResourceNotFoundException;
 import com.hrplatform.mapper.ExportLogMapper;
 import com.hrplatform.repository.DocumentSubmissionRepository;
 import com.hrplatform.repository.ExportLogRepository;
@@ -40,13 +41,21 @@ public class ExportServiceImpl implements ExportService {
     @Override
     @Transactional(readOnly = true)
     public ExportResponse exportToExcel(ExportFilterRequest request, String hrUserEmail) {
-        log.info("Exporting data to Excel for user: {} with filters: {}", hrUserEmail, request);
+        log.info("Exporting data to Excel for user: {} with filters: departmentId={}, status={}, dateRange={} to {}",
+                hrUserEmail, request.getDepartmentId(), request.getSubmissionStatus(),
+                request.getDateRangeStart(), request.getDateRangeEnd());
 
-        // Fetch staff based on filters
+        // Validate and fetch staff based on filters
         List<Staff> staffList = fetchStaffByFilters(request);
+
+        if (staffList.isEmpty()) {
+            log.warn("No staff found matching the filter criteria");
+        }
 
         // Fetch all submissions for these staff
         List<DocumentSubmission> allSubmissions = fetchSubmissionsByFilters(request, staffList);
+
+        log.info("Found {} staff and {} submissions matching filters", staffList.size(), allSubmissions.size());
 
         // Generate Excel file
         byte[] excelData = excelExportService.generateExcelFile(staffList, allSubmissions);
@@ -55,9 +64,7 @@ public class ExportServiceImpl implements ExportService {
         String fileName = generateFileName(request);
 
         // Log export
-        String departmentName = request.getDepartmentId() != null
-                ? departmentService.findById(request.getDepartmentId()).getName()
-                : "All Departments";
+        String departmentName = getDepartmentNameForLog(request);
 
         exportLogRepository.save(
                 exportLogMapper.toEntity(hrUserEmail, request, staffList.size(), departmentName)
@@ -67,7 +74,7 @@ public class ExportServiceImpl implements ExportService {
                 hrUserEmail,
                 "EXPORT",
                 departmentName,
-                String.format("Exported %d staff records", staffList.size())
+                String.format("Exported %d staff records with %d submissions", staffList.size(), allSubmissions.size())
         );
 
         log.info("Export completed successfully. Total records: {}", staffList.size());
@@ -77,31 +84,42 @@ public class ExportServiceImpl implements ExportService {
                 .fileData(excelData)
                 .contentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 .totalRecords(staffList.size())
-                .message("Export completed successfully")
+                .message(String.format("Export completed successfully. %d staff records exported.", staffList.size()))
                 .build();
     }
 
     private List<Staff> fetchStaffByFilters(ExportFilterRequest request) {
         List<Staff> staffList;
 
+        // Filter by department
         if (request.getDepartmentId() != null) {
+            log.info("Filtering by department ID: {}", request.getDepartmentId());
             Department department = departmentService.findById(request.getDepartmentId());
+
             staffList = staffRepository.findAll().stream()
-                    .filter(staff -> staff.getDepartment().getId().equals(request.getDepartmentId()))
+                    .filter(staff -> staff.getDepartment() != null &&
+                            staff.getDepartment().getId().equals(request.getDepartmentId()))
                     .collect(Collectors.toList());
         } else {
+            log.info("Fetching all staff (no department filter)");
             staffList = staffRepository.findAll();
         }
 
         // Apply submission status filter
-        if ("SUBMITTED".equalsIgnoreCase(request.getSubmissionStatus())) {
-            staffList = staffList.stream()
-                    .filter(staff -> documentSubmissionRepository.countByStaffId(staff.getId()) > 0)
-                    .collect(Collectors.toList());
-        } else if ("UNSUBMITTED".equalsIgnoreCase(request.getSubmissionStatus())) {
-            staffList = staffList.stream()
-                    .filter(staff -> documentSubmissionRepository.countByStaffId(staff.getId()) == 0)
-                    .collect(Collectors.toList());
+        if (request.getSubmissionStatus() != null &&
+                !request.getSubmissionStatus().equalsIgnoreCase("ALL")) {
+
+            if ("SUBMITTED".equalsIgnoreCase(request.getSubmissionStatus())) {
+                log.info("Filtering for staff WITH submissions");
+                staffList = staffList.stream()
+                        .filter(staff -> documentSubmissionRepository.countByStaffId(staff.getId()) > 0)
+                        .collect(Collectors.toList());
+            } else if ("UNSUBMITTED".equalsIgnoreCase(request.getSubmissionStatus())) {
+                log.info("Filtering for staff WITHOUT submissions");
+                staffList = staffList.stream()
+                        .filter(staff -> documentSubmissionRepository.countByStaffId(staff.getId()) == 0)
+                        .collect(Collectors.toList());
+            }
         }
 
         return staffList;
@@ -110,7 +128,11 @@ public class ExportServiceImpl implements ExportService {
     private List<DocumentSubmission> fetchSubmissionsByFilters(ExportFilterRequest request, List<Staff> staffList) {
         List<DocumentSubmission> submissions;
 
+        // Apply date range filter if provided
         if (request.getDateRangeStart() != null && request.getDateRangeEnd() != null) {
+            log.info("Filtering submissions by date range: {} to {}",
+                    request.getDateRangeStart(), request.getDateRangeEnd());
+
             if (request.getDepartmentId() != null) {
                 submissions = documentSubmissionRepository.findByDepartmentIdAndDateRange(
                         request.getDepartmentId(),
@@ -124,6 +146,7 @@ public class ExportServiceImpl implements ExportService {
                 );
             }
         } else {
+            // No date filter - fetch all submissions
             if (request.getDepartmentId() != null) {
                 submissions = documentSubmissionRepository.findByDepartmentId(request.getDepartmentId());
             } else {
@@ -136,19 +159,50 @@ public class ExportServiceImpl implements ExportService {
                 .map(Staff::getId)
                 .collect(Collectors.toList());
 
-        return submissions.stream()
+        submissions = submissions.stream()
                 .filter(submission -> staffIds.contains(submission.getStaff().getId()))
                 .collect(Collectors.toList());
+
+        log.info("Filtered submissions count: {}", submissions.size());
+
+        return submissions;
+    }
+
+    private String getDepartmentNameForLog(ExportFilterRequest request) {
+        if (request.getDepartmentId() != null) {
+            try {
+                return departmentService.findById(request.getDepartmentId()).getName();
+            } catch (ResourceNotFoundException e) {
+                return "Unknown Department";
+            }
+        }
+        return "All Departments";
     }
 
     private String generateFileName(ExportFilterRequest request) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
         String timestamp = LocalDateTime.now().format(formatter);
 
-        String departmentPart = request.getDepartmentId() != null
-                ? departmentService.findById(request.getDepartmentId()).getName().replaceAll("\\s+", "_")
-                : "AllDepartments";
+        String departmentPart;
+        if (request.getDepartmentId() != null) {
+            try {
+                departmentPart = departmentService.findById(request.getDepartmentId())
+                        .getName()
+                        .replaceAll("\\s+", "_");
+            } catch (ResourceNotFoundException e) {
+                departmentPart = "UnknownDept";
+            }
+        } else {
+            departmentPart = "AllDepartments";
+        }
 
-        return String.format("Staff_Documents_Export_%s_%s.xlsx", departmentPart, timestamp);
+        String statusPart = "";
+        if (request.getSubmissionStatus() != null &&
+                !request.getSubmissionStatus().equalsIgnoreCase("ALL")) {
+            statusPart = "_" + request.getSubmissionStatus();
+        }
+
+        return String.format("Staff_Documents_Export_%s%s_%s.xlsx",
+                departmentPart, statusPart, timestamp);
     }
 }
