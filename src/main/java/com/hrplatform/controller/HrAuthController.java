@@ -78,7 +78,7 @@ public class HrAuthController {
         return ResponseEntity.ok(ApiResponse.success(null, "Password reset successful"));
     }
 
-    @PostMapping("/password/change")
+    /*@PostMapping("/password/change")
     @PreAuthorize("hasRole('HR')")
     @SecurityRequirement(name = "Bearer Authentication")
     @Operation(summary = "Change password", description = "Change HR user password (Authenticated)")
@@ -92,7 +92,7 @@ public class HrAuthController {
         hrAuthService.changePassword(email, request);
 
         return ResponseEntity.ok(ApiResponse.success(null, "Password changed successfully"));
-    }
+    }*/
 
     @GetMapping("/password-reset/validate-token")
     @Operation(summary = "Validate reset token", description = "Check if password reset token is valid")
