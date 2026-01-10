@@ -7,6 +7,7 @@ import com.hrplatform.dto.request.HrResetPasswordWithTokenRequest;
 import com.hrplatform.dto.response.HrLoginResponse;
 import com.hrplatform.entity.HrUser;
 import com.hrplatform.exception.BadRequestException;
+import com.hrplatform.exception.ResourceNotFoundException;
 import com.hrplatform.exception.UnauthorizedException;
 import com.hrplatform.mapper.HrUserMapper;
 import com.hrplatform.repository.HrUserRepository;
@@ -39,7 +40,7 @@ public class HrAuthServiceImpl implements HrAuthService {
     private final EmailService emailService;
 
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    @Value("${frontend.email.url:http://localhost:3000}")
     private String frontendUrl;
 
     @Value("${app.password-reset-token.expiry-hours:24}")
@@ -110,8 +111,7 @@ public class HrAuthServiceImpl implements HrAuthService {
 
         if (!hrUserService.existsByEmail(request.getEmail())) {
             log.warn("Password reset attempted for non-existent email: {}", request.getEmail());
-            // Don't reveal if email exists or not for security
-            return;
+            throw new ResourceNotFoundException("Email not found in our system");
         }
 
         HrUser hrUser = hrUserService.findByEmail(request.getEmail());
