@@ -1,11 +1,11 @@
 package com.hrplatform.service;
 
-import com.hrplatform.entity.DocumentSubmission;
-import com.hrplatform.entity.Staff;
-
-import java.util.List;
+import com.hrplatform.dto.request.ExportFilterRequest;
 
 public interface ExcelExportService {
 
-    byte[] generateExcelFile(List<Staff> staffList, List<DocumentSubmission> allSubmissions);
+    byte[] exportAllSubmissions(String generatedBy);
+
+    // ✅ ADD THIS NEW METHOD
+    byte[] exportFilteredSubmissions(ExportFilterRequest filter, String generatedBy);
 }

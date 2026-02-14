@@ -31,9 +31,10 @@ public class Department {
     @Column(length = 255)
     private String description;
 
+    // ✅ CHANGED: From "staffList" to "staffMembers"
     @OneToMany(mappedBy = "department", cascade = CascadeType.ALL)
     @Builder.Default
-    private List<Staff> staffList = new ArrayList<>();
+    private List<Staff> staffMembers = new ArrayList<>();
 
     @OneToMany(mappedBy = "department", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
