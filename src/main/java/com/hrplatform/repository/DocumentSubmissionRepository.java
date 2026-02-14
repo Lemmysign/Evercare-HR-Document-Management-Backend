@@ -48,5 +48,8 @@ public interface DocumentSubmissionRepository extends JpaRepository<DocumentSubm
 
     boolean existsByStaffIdAndDocumentRequirementId(UUID staffId, UUID requirementId);
 
+    // New method to support re-upload functionality
+    Optional<DocumentSubmission> findByStaffIdAndDocumentRequirementId(UUID staffId, UUID requirementId);
+
     Optional<DocumentSubmission> findTopByStaffIdOrderByCreatedAtDesc(UUID staffId);
 }
