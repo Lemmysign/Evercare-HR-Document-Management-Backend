@@ -4,6 +4,7 @@ import com.hrplatform.dto.request.DocumentUploadRequest;
 import com.hrplatform.dto.response.ApiResponse;
 import com.hrplatform.dto.response.DocumentUploadResponse;
 import com.hrplatform.entity.Staff;
+import com.hrplatform.exception.FileStorageException;
 import com.hrplatform.service.DocumentSubmissionService;
 import com.hrplatform.service.SessionService;
 import com.hrplatform.service.StaffService;
@@ -37,7 +38,7 @@ public class DocumentSubmissionController {
     public ResponseEntity<ApiResponse<DocumentUploadResponse>> uploadDocument(
             @RequestParam("staffIdNumber") String staffIdNumber,
             @RequestParam("documentRequirementId") UUID documentRequirementId,
-            @RequestParam("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file) throws FileStorageException {
 
         log.info("Document upload request for staff: {}", staffIdNumber);
 
@@ -57,7 +58,7 @@ public class DocumentSubmissionController {
     public ResponseEntity<ApiResponse<List<DocumentUploadResponse>>> uploadMultipleDocuments(
             @RequestHeader("X-Session-Token") String sessionToken,
             @RequestParam("requirementIds") List<UUID> requirementIds,
-            @RequestParam("files") List<MultipartFile> files) {
+            @RequestParam("files") List<MultipartFile> files) throws FileStorageException {
 
         log.info("Multiple document upload with session token ({} files)", files.size());
 
@@ -65,8 +66,8 @@ public class DocumentSubmissionController {
         Map<String, String> session = sessionService.validateSession(sessionToken);
         UUID staffId = UUID.fromString(session.get("staffId"));
 
-        // Get staff by ID
-        Staff staff = staffService.findById(staffId);
+        // ✅ CHANGED: Use findByIdWithDepartment instead of findById
+        Staff staff = staffService.findByIdWithDepartment(staffId);
 
         List<DocumentUploadResponse> responses = documentSubmissionService
                 .uploadMultipleDocumentsWithStaff(staff, requirementIds, files);

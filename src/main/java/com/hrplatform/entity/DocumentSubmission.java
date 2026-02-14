@@ -33,11 +33,13 @@ public class DocumentSubmission {
     @JoinColumn(name = "requirement_id", nullable = false)
     private DocumentRequirement documentRequirement;
 
-    @Column(nullable = false, length = 500)
-    private String cloudinaryUrl;
+    // ✅ CORRECT: Stores relative path like "medical/lemuel_inneh_resume_12345.pdf"
+    @Column(nullable = false, length = 500, name = "file_path")
+    private String filePath;
 
-    @Column(nullable = false, length = 200)
-    private String cloudinaryPublicId;
+    // ❌ REMOVE THIS - Not needed for local storage
+    // @Column(nullable = false, length = 200, name = "public_id")
+    // private String publicId;
 
     @Column(nullable = false, length = 200)
     private String fileName;
@@ -45,7 +47,7 @@ public class DocumentSubmission {
     @Column(nullable = false)
     private Long fileSize;
 
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, length = 150)
     private String mimeType;
 
     @CreationTimestamp
